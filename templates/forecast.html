@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block title %}价格预测 · 阎良甜瓜价格预测 DEMO{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>价格预测</h1>
+  <p>历史实际价格 + 三模型滚动预测 + 未来 90 天预测（含 95% 置信区间）｜ DEMO 模拟数据</p>
+</div>
+
+<div class="card">
+  <div class="card-title">
+    预测曲线
+    <div class="controls">
+      <label for="sel-seg">数据段</label>
+      <select id="sel-seg">
+        <option value="">全部</option>
+        <option value="train">训练集</option>
+        <option value="test">测试集</option>
+        <option value="future">未来预测</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="product-picker">
+    <div class="picker-bar">
+      <span class="picker-label">商品（复选，可全选）</span>
+      <button type="button" class="ghost" id="btn-all">全选</button>
+      <button type="button" class="ghost" id="btn-clear">清空</button>
+      <button type="button" class="ghost" id="btn-reset">默认</button>
+      <span class="card-extra" id="pick-tip">已选 0 个</span>
+    </div>
+    <div class="check-grid" id="product-checks">
+      <div class="empty-tip">商品加载中…</div>
+    </div>
+  </div>
+
+  <div id="chart-boxes"></div>
+  <p class="note" id="series-note">加载中…</p>
+</div>
+
+<div class="card">
+  <div class="card-title">预测明细
+    <span class="card-extra" id="tbl-meta">-</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table" id="tbl-detail">
+      <thead><tr id="tbl-head"><th>日期</th></tr></thead>
+      <tbody><tr><td class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var charts = [];
+  var rendered = {};
+  var tipTimer = null;
+  var COLORS = { actual: '#333333', arima: '#4C7BD9', lstm: '#2ECC71', fusion: '#E67E22' };
+  var current = { fks: [], seg: '', limit: 0, products: [] };
+  var checksBuilt = false;
+
+  onResize(function () {
+    charts.forEach(function (c) { try { c.resize(); } catch (e) {} });
+  });
+
+  function num(v) { return (v === null || v === undefined || v === '') ? null : v; }
+
+  /* ---------------- 商品复选框 ---------------- */
+  function getChecked() {
+    var box = document.getElementById('product-checks');
+    if (!box) return [];
+    return Array.prototype.map.call(
+      box.querySelectorAll('input[type=checkbox]:checked'),
+      function (i) { return i.value; });
+  }
+
+  function updateTip(msg) {
+    var tip = document.getElementById('pick-tip');
+    if (!tip) return;
+    var base = '已选 ' + current.fks.length +
+      (current.limit ? ' / ' + current.limit : '') + ' 个';
+    tip.textContent = msg || base;
+    tip.className = (msg ? 'card-extra warn-text' : 'card-extra');
+  }
+
+  function syncChecks() {
+    var box = document.getElementById('product-checks');
+    if (!box) return;
+    var picked = {};
+    current.fks.forEach(function (v) { picked[String(v)] = true; });
+    Array.prototype.forEach.call(box.querySelectorAll('input[type=checkbox]'),
+      function (inp) {
+        var on = !!picked[inp.value];
+        inp.checked = on;
+        if (inp.parentNode && inp.parentNode.classList) {
+          inp.parentNode.classList.toggle('on', on);
+        }
+      });
+  }
+
+  function buildChecks(products, selected) {
+    var box = document.getElementById('product-checks');
+    if (!box || !products || !products.length) return;
+    current.products = products;
+    if (!checksBuilt) {
+      box.innerHTML = products.map(function (p) {
+        var id = p['商品FK'];
+        return '<label class="check-item" title="商品 ' + id + '">' +
+          '<input type="checkbox" value="' + id + '">' +
+          '<span class="ck-name">' + id + '</span>' +
+          '<span class="ck-plat">' + (p['平台'] || '-') + '</span>' +
+          '</label>';
+      }).join('');
+      checksBuilt = true;
+      box.addEventListener('change', function (e) {
+        if (!e.target || e.target.type !== 'checkbox') return;
+        var all = getChecked(), over = false;
+        if (all.length > current.limit) {
+          e.target.checked = false;
+          all = getChecked();
+          over = true;
+        }
+        current.fks = all;
+        syncChecks();
+        updateTip(over ? ('最多只能选 ' + current.limit + ' 个，已取消最后一个') : null);
+        if (over) {
+          clearTimeout(tipTimer);
+          tipTimer = setTimeout(function () { updateTip(); }, 2200);
+        }
+        loadSeries();
+        loadTable();
+      });
+      document.getElementById('btn-all').addEventListener('click', function () {
+        current.fks = current.products.map(function (p) {
+          return String(p['商品FK']);
+        });
+        syncChecks(); updateTip(); loadSeries(); loadTable();
+      });
+      document.getElementById('btn-clear').addEventListener('click', function () {
+        current.fks = []; syncChecks(); updateTip(); loadSeries(); loadTable();
+      });
+      document.getElementById('btn-reset').addEventListener('click', function () {
+        current.fks = current.products.length
+          ? [String(current.products[0]['商品FK'])] : [];
+        syncChecks(); updateTip(); loadSeries(); loadTable();
+      });
+    }
+    if (!current.fks.length) {
+      current.fks = (selected && selected.length ? selected
+        : (current.products.length ? [current.products[0]['商品FK']] : [])).map(String);
+    }
+    syncChecks();
+    updateTip();
+  }
+
+  /* ---------------- 图表 ---------------- */
+  function disposeCharts() {
+    charts.forEach(function (c) { try { c.dispose(); } catch (e) {} });
+    charts = [];
+    rendered = {};
+  }
+
+  function renderAll(items, attempt) {
+    items.forEach(function (it) {
+      if (rendered[it.fk]) return;
+      var c = renderOne(it);
+      if (c) { charts.push(c); rendered[it.fk] = true; }
+    });
+    var done = Object.keys(rendered).length;
+    if (done < items.length && (attempt || 0) < 6) {
+      setTimeout(function () { renderAll(items, (attempt || 0) + 1); }, 120);
+    }
+  }
+
+  function buildBoxes(items) {
+    var box = document.getElementById('chart-boxes');
+    box.innerHTML = items.map(function (it) {
+      return '<div class="chart-box">' +
+               '<div class="chart-head">商品 ' + it.fk +
+                 '<span class="tag">' + (it.platform || '-') + '</span>' +
+                 '<span class="tag warn">DEMO</span></div>' +
+               '<div class="chart chart-lg" id="chart-fk-' + it.fk + '"></div>' +
+             '</div>';
+    }).join('');
+  }
+
+  function chartError(msg) {
+    var box = document.getElementById('chart-boxes');
+    if (box) box.innerHTML = '<div class="chart-error" style="min-height:160px">' +
+      (msg || MISSING) + '</div>';
+  }
+
+  function renderOne(it) {
+    var el = document.getElementById('chart-fk-' + it.fk);
+    if (!el || !el.clientWidth) return null;
+    var chart = echarts.init(el, null, { renderer: 'canvas' });
+
+    var lo = (it.lo || []).map(num);
+    var hi = (it.hi || []).map(num);
+    var gap = lo.map(function (v, i) {
+      return (v === null || hi[i] === null) ? null : +(hi[i] - v).toFixed(3);
+    });
+
+    var series = [
+      { name: '95% 区间（下界）', type: 'line', stack: 'ci', data: lo,
+        lineStyle: { opacity: 0 }, symbol: 'none', tooltip: { show: false },
+        silent: true, legendHoverLink: false },
+      { name: '95% 区间（融合）', type: 'line', stack: 'ci', data: gap,
+        lineStyle: { opacity: 0 }, symbol: 'none', silent: true,
+        legendHoverLink: false, tooltip: { show: false },
+        areaStyle: { color: 'rgba(230,126,34,.20)' } },
+      { name: '实际价格', type: 'line', data: (it.actual || []).map(num),
+        showSymbol: false, connectNulls: false, z: 5,
+        lineStyle: { width: 2.2, color: COLORS.actual },
+        itemStyle: { color: COLORS.actual } },
+      { name: 'ARIMA 预测', type: 'line', data: (it.arima || []).map(num),
+        showSymbol: false, connectNulls: false,
+        lineStyle: { width: 1.6, color: COLORS.arima, type: 'dashed' },
+        itemStyle: { color: COLORS.arima } },
+      { name: 'LSTM 预测', type: 'line', data: (it.lstm || []).map(num),
+        showSymbol: false, connectNulls: false,
+        lineStyle: { width: 1.6, color: COLORS.lstm, type: 'dashed' },
+        itemStyle: { color: COLORS.lstm } },
+      { name: 'ARIMA-LSTM 融合预测', type: 'line', data: (it.fusion || []).map(num),
+        showSymbol: false, connectNulls: false,
+        lineStyle: { width: 2.2, color: COLORS.fusion },
+        itemStyle: { color: COLORS.fusion },
+        markLine: it.future_from ? {
+          symbol: 'none', silent: true,
+          lineStyle: { color: '#a08a5a', type: 'dotted' },
+          label: { formatter: '未来起点 ' + it.future_from, fontSize: 11,
+                   color: '#8a6a2a', position: 'insideEndTop' },
+          data: [{ xAxis: it.future_from }]
+        } : undefined }
+    ];
+
+    chart.setOption({
+      color: ['#d9b48a', '#e67e22', '#333333', '#4C7BD9', '#2ECC71', '#E67E22'],
+      title: { text: '商品 ' + it.fk + ' · 历史 ' + it.history_len + ' 天 / 未来 ' +
+                     it.future_days + ' 天', left: 0, top: 0,
+               textStyle: { fontSize: 13, fontWeight: 600 } },
+      tooltip: { trigger: 'axis', confine: true,
+                 valueFormatter: function (v) { return v === null ? '-' : v; } },
+      legend: { top: 0, right: 0,
+                data: ['实际价格', 'ARIMA 预测', 'LSTM 预测',
+                       'ARIMA-LSTM 融合预测', '95% 区间（融合）'] },
+      grid: { left: 56, right: 24, top: 46, bottom: 64 },
+      dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 26 }],
+      xAxis: { type: 'category', data: it.dates, boundaryGap: false,
+               axisLabel: { formatter: function (v) { return v.slice(5); } } },
+      yAxis: { type: 'value', name: '元/斤', scale: true,
+               splitLine: { lineStyle: { type: 'dashed', opacity: .5 } } },
+      series: series
+    }, true);
+    chart.resize();
+    return chart;
+  }
+
+  function renderSeries(d) {
+    if (typeof d.limit === 'number') current.limit = d.limit;
+
+    buildChecks(d.products, d.selected);
+    disposeCharts();
+    buildBoxes(d.series);
+    requestAnimationFrame(function () { renderAll(d.series, 0); });
+
+    var el = document.getElementById('series-note');
+    if (el) {
+      var segText = current.seg ? (current.seg + ' 段') : '全部';
+      var days = d.series.map(function (s) { return s.future_days; });
+      var from = d.series[0] ? d.series[0].future_from : null;
+      el.textContent = '已选 ' + d.series.length + ' 个商品（' +
+        d.series.map(function (s) { return s.fk; }).join(' / ') +
+        '）· 历史 ' + (d.series[0] ? d.series[0].history_len : 0) +
+        ' 天 · 未来 ' + Math.min.apply(null, days) + '~' + Math.max.apply(null, days) +
+        ' 天（自 ' + (from || '-') + ' 起）· 明细表按第一个选中商品展示 · 数据段：' +
+        segText + ' · ' + (d.note || 'DEMO 模拟数据，仅作流程演示');
+    }
+  }
+
+  /* ---------------- 明细表 ---------------- */
+  function renderTable(d) {
+    var head = document.getElementById('tbl-head');
+    var body = document.querySelector('#tbl-detail tbody');
+    var meta = document.getElementById('tbl-meta');
+    if (!head || !body) return;
+    if (!d.rows || !d.rows.length) {
+      head.innerHTML = '<th>日期</th>';
+      body.innerHTML = '<tr><td class="empty">该筛选条件下无数据</td></tr>';
+      if (meta) meta.textContent = '-';
+      return;
+    }
+    head.innerHTML = d.columns.map(function (c) { return '<th>' + c + '</th>'; }).join('');
+    body.innerHTML = d.rows.map(function (r) {
+      var cls = r['数据段'] === 'future' ? ' class="future"' : '';
+      return '<tr' + cls + '>' + d.columns.map(function (c) {
+        var v = r[c];
+        return '<td>' + (v === null || v === undefined || v === '' ? '-' : v) + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    if (meta) {
+      meta.textContent = '商品 ' + d.fk + ' · 共 ' + d.total + ' 行，显示 ' +
+        d.rows.length + ' 行 · ' + (d.note || '');
+    }
+  }
+
+  /* ---------------- 加载 ---------------- */
+  function loadSeries() {
+    if (checksBuilt && !current.fks.length) {
+      disposeCharts();
+      chartError('请至少勾选 1 个商品');
+      var note = document.getElementById('series-note');
+      if (note) note.textContent = '未选择商品';
+      return;
+    }
+    getJSON('/api/forecast/series?fks=' + encodeURIComponent(current.fks.join(',')))
+      .then(renderSeries)
+      .catch(function (e) { disposeCharts(); chartError(e.message || MISSING); });
+  }
+
+  function loadTable() {
+    var body = document.querySelector('#tbl-detail tbody');
+    if (checksBuilt && !current.fks.length) {
+      if (body) body.innerHTML = '<tr><td class="empty">请至少勾选 1 个商品</td></tr>';
+      var head0 = document.getElementById('tbl-head');
+      if (head0) head0.innerHTML = '<th>日期</th>';
+      var meta0 = document.getElementById('tbl-meta');
+      if (meta0) meta0.textContent = '-';
+      return;
+    }
+    var url = '/api/forecast/table?fk=' + encodeURIComponent(current.fks[0] || '') +
+              '&seg=' + encodeURIComponent(current.seg) + '&limit=300';
+    getJSON(url)
+      .then(renderTable)
+      .catch(function (e) {
+        if (body) body.innerHTML = '<tr><td class="empty">' + (e.message || MISSING) + '</td></tr>';
+      });
+  }
+
+  var selSeg = document.getElementById('sel-seg');
+  if (selSeg) selSeg.addEventListener('change', function () {
+    current.seg = this.value; loadTable();
+  });
+
+  loadSeries();
+  loadTable();
+</script>
+{% endblock %}

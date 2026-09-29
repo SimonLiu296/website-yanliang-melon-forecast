@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}种植建议 · 阎良甜瓜价格预测 DEMO{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>种植与销售建议</h1>
+  <p>产业调研知识（品种 / 月度价格区间 / 种植批次）× 模型预测结果 ｜ DEMO 模拟数据</p>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><span class="kpi-label">调研品种</span>
+    <span class="kpi-value" id="kpi-var">-</span><i>个</i></div>
+  <div class="kpi"><span class="kpi-label">种植批次</span>
+    <span class="kpi-value" id="kpi-batch">-</span><i>批</i></div>
+  <div class="kpi"><span class="kpi-label">销售时机建议</span>
+    <span class="kpi-value" id="kpi-sales">-</span><i>条</i></div>
+  <div class="kpi"><span class="kpi-label">数据日期</span>
+    <span class="kpi-value" id="kpi-date" style="font-size:20px">-</span></div>
+</div>
+
+<div class="card">
+  <div class="card-title">种植批次时间轴与窗口均价
+    <span class="card-extra" id="adv-meta">artifacts/outputs/figures/planting_advice.png</span>
+  </div>
+  <figure id="fig-planting" style="margin:0">
+    <div class="empty-tip">加载中…</div>
+  </figure>
+  <p class="note">批次、品种、上市时间与「综合推荐理由与操作策略」均取自调研资料
+    <code>artifacts/data/external/planting_batch_plan.csv</code>；柱高为该批次窗口内模型预测均价，
+    绿框为调研对应市场价格（产地批发口径）。</p>
+</div>
+
+<div class="card">
+  <div class="card-title">种植建议
+    <span class="card-extra" id="plant-meta">-</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table" id="tbl-plant">
+      <thead>
+        <tr>
+          <th>品种</th><th>建议批次</th><th>预计上市时间</th><th>预测价格区间</th>
+          <th>预测均价</th><th>调研价格区间</th><th>皮类 / 生长天数</th>
+          <th>操作策略</th><th>数据覆盖</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </div>
+  <p class="note" id="plant-note">加载中…</p>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">销售时机建议（4-6 月 × 薄皮 / 厚皮）
+      <span class="card-extra" id="sales-meta">-</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="tbl-sales">
+        <thead>
+          <tr>
+            <th>月份</th><th>品种类型</th><th>预测价格</th><th>模型环比</th>
+            <th>调研价格区间</th><th>建议销售策略</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="note">策略 = 调研「市场情况备注」+ 模型环比方向（≥+5% 挺价、≤-5% 走量、
+      之间平稳）；预测价格为窗口内日均模型预测（融合优先，缺失回退 LSTM → ARIMA）。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">4-6 月价格对比
+      <span class="card-extra">左轴调研区间 / 右轴模型预测</span>
+    </div>
+    <div id="chart-month" class="chart"></div>
+    <p class="note" id="month-note">左轴为产地批发调研价格区间（浮动条），右轴为模型预测均价
+      （线上零售）；两套口径绝对值不可直接比较，仅比较走势形态。</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">各品种实际均价与模型预测均价
+    <span class="card-extra" id="var-meta">-</span>
+  </div>
+  <div id="chart-variety" class="chart"></div>
+  <p class="note">训练 + 测试段（有实际值口径）；「· 无商品」表示该调研品种在当前数据中没有对应商品，
+    未参与模型评估，价格区间由同批次窗口给出。</p>
+</div>
+
+<div class="card">
+  <div class="card-title">图表输出
+    <span class="card-extra">artifacts/outputs/figures/（由 scripts/src/models/advice.py、variety_compare.py 生成）</span>
+  </div>
+  <div class="gallery" id="adv-gallery">
+    <div class="empty-tip">加载中…</div>
+  </div>
+</div>
+
+<div class="card" id="advice-note">
+  <div class="card-title">口径与数据说明（DEMO）</div>
+  <div class="note">
+    <ul>
+      <li><b>知识来源</b>：品种知识、月度价格区间、种植批次均来自
+        <code>artifacts/data/external/*.xlsx</code>（由 <code>scripts/src/models/export_knowledge.py</code>
+        导出为 CSV），建议文案不自行杜撰。</li>
+      <li><b>价格口径</b>：模型预测价为线上零售口径（基准取自 skus_clean 单价元/斤），
+        调研价格区间为产地批发口径（1-5 元/斤），<b>两者绝对值不可直接比较</b>，
+        页面以「价格指数 / 走势」对比为准。</li>
+      <li><b>预测口径</b>：融合模型受 LSTM 预热影响前 14 天无预测，故按
+        融合 → LSTM → ARIMA 顺序回退；均价与价格区间统一为「按日取均值」口径。</li>
+      <li><b>异常字段</b>：调研表 <code>阴雨天影响不大天数</code> 在源文件中被 Excel
+        解析为日期序列 <b>46117</b>（疑为「4-5」），CSV 原样保留、不参与任何计算，
+        有影响天数仍取「10天左右」。</li>
+      <li><b>结论边界</b>：模拟数据 + 演示模型，本页所有建议不作为种植、定价或经营决策依据。</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var monthChart = chartOf('chart-month');
+  var varietyChart = chartOf('chart-variety');
+  onResize(function () {
+    if (monthChart) monthChart.resize();
+    if (varietyChart) varietyChart.resize();
+  });
+
+  function esc(v) {
+    if (v === null || v === undefined || v === '' ||
+        (typeof v === 'number' && isNaN(v))) return '-';
+    return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function num(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = (val === undefined || val === null || val === '') ? '-' : val;
+  }
+
+  /* ---------------- 表格 ---------------- */
+  function renderPlant(rows, data) {
+    var body = document.querySelector('#tbl-plant tbody');
+    if (!body) return;
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="9" class="empty">' + MISSING + '</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(function (r) {
+      var attr = (r['皮类'] === '未知' || !r['皮类']) ? '-' :
+                 (r['皮类'] + ' / ' + (r['生长天数'] || '-'));
+      var price = r['预测均价'];
+      return '<tr><td><b>' + esc(r['品种']) + '</b></td>' +
+        '<td>' + esc(r['建议批次']) + '</td>' +
+        '<td>' + esc(r['预计上市时间']) + '</td>' +
+        '<td>' + esc(r['预测价格区间']) + '</td>' +
+        '<td>' + (price === null || price === undefined || isNaN(Number(price))
+                  ? '-' : Number(price).toFixed(2)) + '</td>' +
+        '<td>' + esc(r['调研价格区间']) + '</td>' +
+        '<td>' + esc(attr) + '</td>' +
+        '<td style="min-width:260px">' + esc(r['操作策略']) + '</td>' +
+        '<td>' + esc(r['数据覆盖']) + '</td></tr>';
+    }).join('');
+    setText('plant-meta', '共 ' + rows.length + ' 个调研品种 · ' + (data.note || ''));
+    setText('plant-note',
+      '预测价格区间为窗口内「按日取均值」后的最小~最大值；未列入调研批次的品种仅给调研价格区间与知识属性。' +
+      ' ｜ ' + (data.caliber || ''));
+  }
+
+  function renderSales(rows) {
+    var body = document.querySelector('#tbl-sales tbody');
+    if (!body) return;
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty">' + MISSING + '</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(function (r) {
+      var p = num(r['预测价格']);
+      var m = num(r['模型环比']);
+      return '<tr><td>' + esc(r['月份']) + '</td>' +
+        '<td>' + esc(r['品种类型']) + '</td>' +
+        '<td>' + (p === null ? '-' : p.toFixed(2) + ' 元/斤') + '</td>' +
+        '<td>' + (m === null ? '-' : (m > 0 ? '+' : '') + m.toFixed(1) + '%') + '</td>' +
+        '<td>' + esc(r['调研价格区间']) + '</td>' +
+        '<td style="min-width:220px">' + esc(r['建议销售策略']) + '</td></tr>';
+    }).join('');
+    setText('sales-meta', '共 ' + rows.length + ' 条');
+  }
+
+  /* ---------------- 图表 ---------------- */
+  function renderMonth(month) {
+    if (!monthChart || !month.length) return;
+    var cats = month.map(function (r) {
+      return r['月份'] + (String(r['月份']).indexOf('月') >= 0 ? '' : '月') +
+             '·' + r['皮类'];
+    });
+    var lo = month.map(function (r) { return num(r['调研区间下限']); });
+    var hi = month.map(function (r) { return num(r['调研区间上限']); });
+    var band = lo.map(function (v, i) {
+      return (v === null || hi[i] === null) ? null : [v, hi[i]];
+    });
+    var fusion = month.map(function (r) { return num(r['ARIMA-LSTM融合预测均价']); });
+    var actual = month.map(function (r) { return num(r['实际均价']); });
+
+    monthChart.setOption({
+      tooltip: { trigger: 'axis', confine: true },
+      legend: { top: 0, data: ['调研价格区间（产地批发）', '融合预测均价', '实际均价'] },
+      grid: { left: 54, right: 58, top: 46, bottom: 46 },
+      xAxis: { type: 'category', data: cats, axisLabel: { fontSize: 12 } },
+      yAxis: [
+        { type: 'value', name: '调研 元/斤', min: 0, max: 6,
+          splitLine: { lineStyle: { type: 'dashed', opacity: .5 } } },
+        { type: 'value', name: '模型 元/斤', scale: true,
+          splitLine: { show: false } }
+      ],
+      series: [
+        { name: '调研价格区间（产地批发）', type: 'bar', barMaxWidth: 34,
+          data: band, itemStyle: { color: '#2ECC71', opacity: .75 },
+          label: { show: true, position: 'top', fontSize: 10, color: '#1E8449',
+            formatter: function (p) {
+              return p.value ? p.value[0] + '~' + p.value[1] : '';
+            } } },
+        { name: '融合预测均价', type: 'bar', yAxisIndex: 1, barMaxWidth: 34,
+          data: fusion, itemStyle: { color: '#E67E22' },
+          label: { show: true, position: 'top', fontSize: 10,
+            formatter: function (p) { return p.value == null ? '-' : p.value; } } },
+        { name: '实际均价', type: 'line', yAxisIndex: 1, data: actual,
+          symbol: 'circle', symbolSize: 7,
+          lineStyle: { width: 2, color: '#333333', type: 'dashed' },
+          itemStyle: { color: '#333333' } }
+      ]
+    }, true);
+    monthChart.resize();
+    setText('month-note',
+      '左轴为产地批发调研价格区间（浮动条），右轴为模型预测均价（线上零售）；' +
+      '两套口径绝对值不可直接比较，仅比较走势形态。');
+  }
+
+  function renderVariety(rows) {
+    if (!varietyChart || !rows.length) return;
+    var names = rows.map(function (r) {
+      var skin = (r['皮类'] && r['皮类'] !== '未知') ? ('（' + r['皮类'] + '）') : '';
+      var none = Number(r['商品数']) === 0 ? ' · 无商品' : '';
+      return r['品种'] + skin + none;
+    });
+    function col(key) {
+      return rows.map(function (r) {
+        var v = num(r[key]);
+        return v === null ? (Number(r['商品数']) === 0 ? null : 0) : v;
+      });
+    }
+    varietyChart.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: { top: 0 },
+      grid: { left: 56, right: 24, top: 46, bottom: 66 },
+      xAxis: { type: 'category', data: names,
+               axisLabel: { rotate: 30, fontSize: 11 } },
+      yAxis: { type: 'value', name: '均价 元/斤', scale: true,
+               splitLine: { lineStyle: { type: 'dashed', opacity: .5 } } },
+      series: [
+        { name: '实际均价', type: 'bar', barMaxWidth: 18, data: col('实际均价'),
+          itemStyle: { color: '#333333' } },
+        { name: 'ARIMA 预测', type: 'bar', barMaxWidth: 18,
+          data: col('ARIMA预测均价'), itemStyle: { color: '#4C7BD9' } },
+        { name: 'LSTM 预测', type: 'bar', barMaxWidth: 18,
+          data: col('LSTM预测均价'), itemStyle: { color: '#2ECC71' } },
+        { name: '融合预测', type: 'bar', barMaxWidth: 18,
+          data: col('ARIMA-LSTM融合预测均价'), itemStyle: { color: '#E67E22' } }
+      ]
+    }, true);
+    varietyChart.resize();
+    setText('var-meta', '共 ' + rows.length + ' 行（调研 9 个品种 + 未识别商品）');
+  }
+
+  /* ---------------- 图片 ---------------- */
+  function renderFigures(figs) {
+    var box = document.getElementById('adv-gallery');
+    if (!box) return;
+    var labels = {
+      planting: '种植批次与销售时机建议',
+      sales: '薄皮 / 厚皮 × 4-6 月价格对比',
+      variety: '各品种实际均价 vs 预测均价'
+    };
+    var keys = Object.keys(figs || {});
+    if (!keys.length) {
+      box.innerHTML = '<div class="empty-tip">' + MISSING + '</div>';
+      return;
+    }
+    box.innerHTML = keys.map(function (k) {
+      var src = '/figures/' + encodeURIComponent(figs[k]);
+      var label = labels[k] || figs[k];
+      return '<figure><img src="' + src + '" alt="' + label + '" loading="lazy">' +
+             '<figcaption>' + label + ' · <code>' + figs[k] + '</code></figcaption></figure>';
+    }).join('');
+
+    var fig = document.getElementById('fig-planting');
+    if (fig && figs.planting) {
+      fig.innerHTML = '<img src="/figures/' + encodeURIComponent(figs.planting) +
+        '" alt="种植批次时间轴与窗口均价" loading="lazy" style="width:100%">';
+    }
+  }
+
+  /* ---------------- 加载 ---------------- */
+  getJSON('/api/advice')
+    .then(function (d) {
+      setText('kpi-var', (d.planting || []).length);
+      setText('kpi-batch', (d.batches || []).length);
+      setText('kpi-sales', (d.sales || []).length);
+      setText('kpi-date', d.data_date);
+      renderPlant(d.planting || [], d);
+      renderSales(d.sales || []);
+      renderMonth(d.month || []);
+      renderVariety(d.variety || []);
+      renderFigures(d.figures);
+    })
+    .catch(function (e) {
+      var msg = e.message || MISSING;
+      ['kpi-var', 'kpi-batch', 'kpi-sales', 'kpi-date'].forEach(function (id) {
+        setText(id, '—');
+      });
+      var p = document.querySelector('#tbl-plant tbody');
+      if (p) p.innerHTML = '<tr><td colspan="9" class="empty">' + msg + '</td></tr>';
+      var s = document.querySelector('#tbl-sales tbody');
+      if (s) s.innerHTML = '<tr><td colspan="6" class="empty">' + msg + '</td></tr>';
+      var g = document.getElementById('adv-gallery');
+      if (g) g.innerHTML = '<div class="empty-tip">' + msg + '</div>';
+      var f = document.getElementById('fig-planting');
+      if (f) f.innerHTML = '<div class="chart-error">' + msg + '</div>';
+      showBoxError('chart-month', msg);
+      showBoxError('chart-variety', msg);
+    });
+</script>
+{% endblock %}

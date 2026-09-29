@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}预测概览 · 阎良甜瓜价格预测 DEMO{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>预测概览</h1>
+  <p>ARIMA 基线 · LSTM 深度学习 · ARIMA-LSTM 残差融合 ｜ 全部为 DEMO 演示结果</p>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><span class="kpi-label">预测商品数</span>
+    <span class="kpi-value" id="kpi-product">-</span><i>个</i></div>
+  <div class="kpi"><span class="kpi-label">预测天数</span>
+    <span class="kpi-value" id="kpi-days">-</span><i>天</i></div>
+  <div class="kpi"><span class="kpi-label">参与模型</span>
+    <span class="kpi-value" id="kpi-models">-</span><i>个</i></div>
+  <div class="kpi"><span class="kpi-label">最优模型（MAE）</span>
+    <span class="kpi-value" id="kpi-best" style="font-size:20px">-</span></div>
+  <div class="kpi"><span class="kpi-label">最优 MAE</span>
+    <span class="kpi-value" id="kpi-mae">-</span></div>
+  <div class="kpi"><span class="kpi-label">最优 MAPE</span>
+    <span class="kpi-value" id="kpi-mape">-</span><i>%</i></div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">模型精度对比
+      <span class="card-extra" id="cmp-date">-</span>
+    </div>
+    <div id="chart-compare" class="chart"></div>
+    <p class="note" id="cmp-note">统一评估窗口：ARIMA ∩ LSTM 测试段（约序列最后 15%），三模型均未参与训练。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">未来预测区间（95%）
+      <span class="card-extra">按 30 / 60 / 90 天</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="tbl-interval">
+        <thead>
+          <tr><th>模型</th><th>预测天数</th><th>MAE</th><th>RMSE</th><th>MAPE</th>
+              <th>区间下限</th><th>区间上限</th></tr>
+        </thead>
+        <tbody><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+      </table>
+    </div>
+    <p class="note">区间为该模型未来对应天数内预测值上下界的均值，随预测天数拉长而变宽。</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">图表输出
+    <span class="card-extra">artifacts/outputs/figures/（由 visualize.py / variety_compare.py / advice.py 生成）</span>
+  </div>
+  <div class="gallery" id="gallery">
+    <div class="empty-tip">加载中…</div>
+  </div>
+</div>
+
+<div class="card" id="data-note">
+  <div class="card-title">数据说明（DEMO）</div>
+  <div class="note">
+    <ul>
+      <li><b>真实数据</b>：仅 2 个采集批次（2026-09-24 / 2026-09-26），
+        prices_clean 共 631 + 516 条记录、87 个商品；规格级
+        <code>(商品FK, 规格)</code> 两批次仅 <b>11</b> 条可对齐，
+        因此变化率统计以<b>商品级 79 个商品</b>为主，明细保留外连接并标注匹配状态。</li>
+      <li><b>模拟数据</b>：真实数据不足以支撑日级时序建模，
+        故用 <code>scripts/src/models/simulate_series.py</code> 生成
+        25 商品 × 180 天（2026-04-01 起）模拟序列，含趋势 + 季节 + 噪声 + 周末 +
+        节假日窗口，并按调研资料加入品种 / 皮类 / 连续阴雨与月度价格规则
+        （薄皮 4 月 +20~30%、6 月 -10%~-20% 等），随机种子固定。</li>
+      <li><b>产业知识</b>：<code>artifacts/data/external/*.xlsx</code> 由
+        <code>scripts/src/models/export_knowledge.py</code> 导出为 CSV（品种知识、月度价格区间、
+        种植批次），ARIMA 以外生变量、LSTM 以日历 + 天气特征接入；
+        品种 / 皮类 / 月度对比见 <a href="/advice">种植建议</a> 页。</li>
+      <li><b>评估口径</b>：ARIMA 前 80% 拟合、测试段滚动一步预测；LSTM 70/15/15 划分、
+        序列长度 14、早停 patience=10（前 40 轮热身不计数）；融合与两者共用
+        ARIMA ∩ LSTM 测试段作为统一窗口。</li>
+      <li><b>区间口径</b>：ARIMA 用预测标准差 × 1.96，LSTM 用训练残差标准差 × 1.96，
+        融合区间取两者并集式加宽（DEMO 简化处理）。</li>
+      <li><b>结论边界</b>：本页所有数值均为演示输出，不作为采购、定价或经营决策依据。</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var compareChart = chartOf('chart-compare');
+  if (compareChart) onResize(function () { compareChart.resize(); });
+
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = (val === undefined || val === null || val === '') ? '-' : val;
+  }
+
+  function renderKpi(data) {
+    var k = data.kpis || {};
+    setText('kpi-product', k.product_count);
+    setText('kpi-days', k.forecast_days);
+    setText('kpi-models', k.model_count);
+    setText('kpi-best', k.best_model);
+    setText('kpi-mae', k.best_mae);
+    setText('kpi-mape', k.best_mape);
+    setText('cmp-date', '数据日期 ' + (data.data_date || '-'));
+  }
+
+  function renderCompare(m) {
+    if (!compareChart) return;
+    var metricLabels = m.metrics.map(function (x) { return x.label; });
+    var series = m.series.map(function (s) {
+      return {
+        name: s.name,
+        type: 'bar',
+        barMaxWidth: 34,
+        data: [s.MAE, s.RMSE, s.MAPE],
+        itemStyle: { color: s.color },
+        label: { show: true, position: 'top', fontSize: 11,
+                 formatter: function (p) { return p.value == null ? '-' : p.value; } }
+      };
+    });
+    compareChart.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      legend: { top: 0 },
+      grid: { left: 50, right: 20, top: 46, bottom: 34 },
+      xAxis: { type: 'category', data: ['MAE', 'RMSE', 'MAPE (%)'],
+               axisLabel: { fontSize: 12 } },
+      yAxis: { type: 'value', name: '误差（越小越好）',
+               splitLine: { lineStyle: { type: 'dashed', opacity: .5 } } },
+      series: series
+    }, true);
+    setText('cmp-note',
+      '统一评估窗口：' + (m.window || '-') +
+      ' ｜ 最优模型：' + (m.best || '-') +
+      ' ｜ ' + (m.note || 'DEMO 模拟数据'));
+  }
+
+  function renderInterval(m) {
+    var body = document.querySelector('#tbl-interval tbody');
+    if (!body) return;
+    if (!m.table || !m.table.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
+      return;
+    }
+    body.innerHTML = m.table.map(function (r) {
+      function f(v) { return (v === null || v === undefined) ? '-' : v; }
+      return '<tr><td>' + f(r['模型']) + '</td><td>' + f(r['预测天数']) + '</td>' +
+        '<td>' + f(r['MAE']) + '</td><td>' + f(r['RMSE']) + '</td><td>' + f(r['MAPE']) + '</td>' +
+        '<td>' + f(r['置信区间下限']) + '</td><td>' + f(r['置信区间上限']) + '</td></tr>';
+    }).join('');
+  }
+
+  var GALLERY_LABELS = {
+    'forecast_overview': '历史价格 + 预测价格（含 95% 区间）',
+    'model_comparison': '三模型精度对比',
+    'simulated_series_sample': '模拟日级价格时序样本',
+    'simulated_series_by_variety': '按品种 / 皮类的模拟价格走势',
+    'price_change_distribution': '真实两批次价格变化分布',
+    'arima_forecast_sample': 'ARIMA 预测样本',
+    'arima_acf_pacf_sample': 'ARIMA ACF / PACF 定阶图',
+    'lstm_forecast_sample': 'LSTM 预测样本',
+    'fusion_forecast_sample': '融合模型预测样本',
+    'forecast_by_variety': '各品种实际均价 vs 预测均价',
+    'forecast_by_skin_month': '薄皮 / 厚皮 × 4-6 月价格对比',
+    'planting_advice': '种植批次与销售时机建议'
+  };
+
+  function renderGallery(names) {
+    var box = document.getElementById('gallery');
+    if (!box) return;
+    var dated = (names || []).filter(function (n) {
+      if (!/_\d{8}\.png$/.test(n)) return false;
+      var stem = n.replace(/_\d{8}\.png$/, '');
+      return Object.prototype.hasOwnProperty.call(GALLERY_LABELS, stem);
+    });
+    if (!dated.length) {
+      box.innerHTML = '<div class="empty-tip">' + MISSING + '</div>';
+      return;
+    }
+    box.innerHTML = dated.map(function (n) {
+      var stem = n.replace(/_\d{8}\.png$/, '');
+      var label = GALLERY_LABELS[stem] || stem;
+      var src = '/figures/' + encodeURIComponent(n);
+      return '<figure><img src="' + src + '" alt="' + label + '" loading="lazy">' +
+             '<figcaption>' + label + ' · <code>' + n + '</code></figcaption></figure>';
+    }).join('');
+  }
+
+  getJSON('/api/forecast/summary')
+    .then(function (d) { renderKpi(d); renderGallery(d.figures); })
+    .catch(function (e) {
+      ['kpi-product','kpi-days','kpi-models','kpi-best','kpi-mae','kpi-mape']
+        .forEach(function (id) { setText(id, '—'); });
+      var box = document.getElementById('gallery');
+      if (box) box.innerHTML = '<div class="empty-tip">' + (e.message || MISSING) + '</div>';
+      var body = document.querySelector('#tbl-interval tbody');
+      if (body) body.innerHTML = '<tr><td colspan="7" class="empty">' +
+        (e.message || MISSING) + '</td></tr>';
+      showBoxError('chart-compare', e.message || MISSING);
+    });
+
+  getJSON('/api/forecast/models')
+    .then(function (m) { renderCompare(m); renderInterval(m); })
+    .catch(function (e) {
+      showBoxError('chart-compare', e.message || MISSING);
+      var body = document.querySelector('#tbl-interval tbody');
+      if (body) body.innerHTML = '<tr><td colspan="7" class="empty">' +
+        (e.message || MISSING) + '</td></tr>';
+    });
+</script>
+{% endblock %}

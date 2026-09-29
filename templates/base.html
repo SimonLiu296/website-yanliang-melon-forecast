@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}阎良甜瓜价格预测 DEMO{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <link rel="shortcut icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/echarts.min.js') }}"></script>
+  <script>
+    if (typeof echarts === 'undefined') {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        阎良甜瓜价格预测
+        <small>DEMO 模式</small>
+      </div>
+      <nav class="nav">
+        <a href="/" class="{{ 'on' if active == 'index' }}">预测概览</a>
+        <a href="/forecast" class="{{ 'on' if active == 'forecast' }}">价格预测</a>
+        <a href="/advice" class="{{ 'on' if active == 'advice' }}">种植建议</a>
+        <a href="/#data-note">数据说明</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="demo-banner">
+      <b>DEMO 模式 · 数据不足</b>：真实数据仅有 2 个采集批次（规格级仅 11 条可对齐），
+      本页价格序列由 <code>scripts/src/models/simulate_series.py</code> 模拟生成，
+      所有预测、指标与图表仅作流程演示，<b>不构成任何实际价格判断</b>。
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    阎良甜瓜价格预测 DEMO · Flask + ECharts ·
+    数据来源：artifacts/outputs/tables/（由 python scripts/src/models/main.py 生成）
+  </footer>
+
+  <script>
+    function chartOf(id) {
+      var el = document.getElementById(id);
+      if (!el) return null;
+      return echarts.init(el, null, { renderer: 'canvas' });
+    }
+
+    function getJSON(url) {
+      return fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.data || res.data.available === false) {
+            throw new Error((res.data && res.data.hint) || '数据加载失败');
+          }
+          return res.data;
+        });
+    }
+
+    function showBoxError(id, msg) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="chart-error">' + (msg || '数据加载失败') + '</div>';
+    }
+
+    var resizeHandlers = [];
+    function onResize(fn) { resizeHandlers.push(fn); }
+    window.addEventListener('resize', function () {
+      resizeHandlers.forEach(function (fn) { try { fn(); } catch (e) {} });
+    });
+
+    var MISSING = '暂无预测结果，请先运行 python scripts/src/models/main.py 生成预测结果。';
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

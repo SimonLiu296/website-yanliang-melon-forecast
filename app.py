@@ -25,6 +25,20 @@ load_dotenv(BASE_DIR / ".env")
 app = Flask(__name__, static_folder="public/static", static_url_path="/static")
 
 FIG_DIR = BASE_DIR / "public" / "figures"
+FIG_MANIFEST = BASE_DIR / "figures.json"
+
+
+def figure_names():
+    """图表 PNG 清单：本地读 public/figures 目录；线上函数包不含 public/ 时回退 figures.json。"""
+    if FIG_DIR.is_dir():
+        return sorted(p.name for p in FIG_DIR.glob("*.png"))
+    if FIG_MANIFEST.is_file():
+        try:
+            return sorted(json.loads(FIG_MANIFEST.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return []
+    return []
+
 
 MISSING_HINT = "暂无预测结果，请先运行 python seed.py 灌入数据。"
 
@@ -214,7 +228,7 @@ def api_summary():
     best = base["MAE"].astype(float).idxmin() if not base.empty else "-"
     fusions = read_table("fusion_forecast")
     horizon = int(pd.to_numeric(cmp_df["预测天数"], errors="coerce").max() or 0)
-    figures = sorted(p.name for p in FIG_DIR.glob("*.png")) if FIG_DIR.is_dir() else []
+    figures = figure_names()
 
     return jsonify({
         "available": True,
@@ -440,11 +454,12 @@ def api_advice():
     variety = read_table("variety_forecast")
     skin = read_table("skin_type_forecast")
 
+    names = set(figure_names())
     figures = {}
     for key, stem in (("planting", "planting_advice"),
                       ("sales", "forecast_by_skin_month"),
                       ("variety", "forecast_by_variety")):
-        if (FIG_DIR / f"{stem}.png").is_file():
+        if f"{stem}.png" in names:
             figures[key] = f"{stem}.png"
 
     batches = []

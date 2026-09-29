@@ -36,6 +36,7 @@ website-yanliang-melon-forecast/
 ├── .env.example        # 连接串模板
 ├── .gitignore          # .env / .vercel / __pycache__
 ├── data/               # 数据快照（13 张 CSV，seed.py 从 artifacts 只读复制）
+├── figures.json        # 52 张图表 PNG 清单（线上函数包不含 public/ 时 API 回退读取）
 ├── templates/          # 页面模板（与原版一致）
 └── public/
     ├── static/         # css/js/favicon（本地与 Vercel CDN 同一路径）
@@ -74,6 +75,8 @@ vercel env add DATABASE_URL              # 粘贴 .env 中的连接串（product
 - Vercel 按 Flask **框架预设**直接托管根目录 `app.py`（原生路径路由，无需 rewrite）；
   `public/figures/*.png` 与 `public/static/**` 由 CDN 直出。不要在 `vercel.json`
   里配 rewrite——内部重写会把 PATH_INFO 覆盖成目标路径，导致 404 JSON（历史故障根因）。
+  注意：Vercel 函数包不含 `public/`，`/api/forecast/summary`、`/api/advice` 的图表
+  清单回退读根目录 `figures.json`（增删 PNG 后同步更新该清单）。
 - 函数区域（新加坡 `sin1`，与 Neon 同区）：Dashboard → Settings → Functions →
   Serverless Region 选 `Singapore (sin1)`；函数依赖仅 5 个小包，冷启动轻。
 - GitHub 导入备选：Root Directory 填 `website-yanliang-melon-forecast`，

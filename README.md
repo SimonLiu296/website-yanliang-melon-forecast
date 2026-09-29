@@ -28,9 +28,8 @@
 
 ```
 website-yanliang-melon-forecast/
-├── app.py              # Flask 应用（读 Neon：pd.read_sql + 进程内缓存；缺表降级 unavailable）
-├── api/index.py        # Vercel 函数入口（from app import app）
-├── vercel.json         # rewrite → /api/index，区域 sin1
+├── app.py              # Flask 应用（读 Neon：pd.read_sql + 进程内缓存；缺表降级 unavailable；Vercel 框架入口）
+├── vercel.json         # 项目配置（函数区域在 Dashboard → Settings → Functions 设置）
 ├── requirements.txt    # flask/pandas/sqlalchemy/psycopg[binary]/python-dotenv（无 torch）
 ├── seed.py             # artifacts CSV → Neon 灌库 + 行数对账 + meta 表
 ├── .env                # 真实 DATABASE_URL（已 gitignore，不提交）
@@ -72,13 +71,13 @@ vercel --prod                            # 生产
 vercel env add DATABASE_URL              # 粘贴 .env 中的连接串（production/preview 各设一次）
 ```
 
-- 区域已固定 `sin1`（新加坡），与 Neon ap-southeast-1 同区；函数依赖仅 5 个小包，冷启动轻。
-- `vercel.json` rewrite 把所有路径进 `/api/index`；`public/figures/*.png` 与
-  `public/static/**` 由 CDN 直出（文件系统路由优先于 rewrite）。
+- Vercel 按 Flask **框架预设**直接托管根目录 `app.py`（原生路径路由，无需 rewrite）；
+  `public/figures/*.png` 与 `public/static/**` 由 CDN 直出。不要在 `vercel.json`
+  里配 rewrite——内部重写会把 PATH_INFO 覆盖成目标路径，导致 404 JSON（历史故障根因）。
+- 函数区域（新加坡 `sin1`，与 Neon 同区）：Dashboard → Settings → Functions →
+  Serverless Region 选 `Singapore (sin1)`；函数依赖仅 5 个小包，冷启动轻。
 - GitHub 导入备选：Root Directory 填 `website-yanliang-melon-forecast`，
   `DATABASE_URL` 在 Vercel 环境变量里设置（`.env` 已 gitignore 不上传）。
-- 若构建提示根 `app.py` 与 `api/index.py` 入口歧义：改名 `webapp.py` +
-  `api/index.py` 内 `from webapp import app`。
 
 ## 故障排查
 

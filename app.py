@@ -2,7 +2,7 @@
 """阎良甜瓜价格预测 DEMO（Flask + ECharts，数据存储于 Neon Postgres）
 
 本地运行：python app.py  ->  http://127.0.0.1:5001
-Vercel：api/index.py 导出 app；图表 PNG 在 public/figures/（CDN 直出），静态资源在 public/static/。
+Vercel：框架预设直接托管本文件（原生路径路由）；图表 PNG 在 public/figures/（CDN 直出），静态资源在 public/static/。
 
 数据：TABLE_STEMS 中可生成的 13 张表在 Neon 中与表名同名（列名保留中文表头），
       灌库：python seed.py（源 CSV 快照在 data/ 下）；数据日期见 meta 表。
